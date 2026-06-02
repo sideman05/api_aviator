@@ -13,27 +13,17 @@ services:
       - key: DJANGO_ALLOWED_HOSTS
         value: ".onrender.com"
       - key: DATABASE_URL
-        value: "postgresql://neondb_owner:npg_unZLlG7Fk2hz@ep-patient-rice-aq450a65-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+        fromDatabase:
+          name: aviator-backend-db
+          property: connectionString
       - key: DATABASE_CONN_MAX_AGE
         value: "0"
-
-  - type: worker
-    name: aviator-backend-monitor
-    runtime: python
-    plan: starter
-    rootDir: django_backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: python manage.py run_monitor_worker
-    autoDeploy: true
-    envVars:
-      - key: DJANGO_DEBUG
-        value: "False"
-      - key: DJANGO_ALLOWED_HOSTS
-        value: ".onrender.com"
-      - key: DATABASE_URL
-        value: "postgresql://neondb_owner:npg_unZLlG7Fk2hz@ep-patient-rice-aq450a65-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-      - key: DATABASE_CONN_MAX_AGE
-        value: "0"
+      - key: AVIATOR_RUN_MONITOR_IN_WEB
+        value: "True"
+      - key: AVIATOR_AUTO_START_MONITOR
+        value: "True"
+      - key: GUNICORN_WORKERS
+        value: "1"
 
 databases:
   - name: aviator-backend-db

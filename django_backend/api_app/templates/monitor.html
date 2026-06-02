@@ -83,6 +83,19 @@
         border-radius: 10px;
         background: #0a1322;
       }
+      button {
+        border: 1px solid #334155;
+        border-radius: 10px;
+        background: #152238;
+        color: #e6eef8;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        padding: 8px 10px;
+      }
+      button:hover {
+        background: #1e293b;
+      }
     </style>
   </head>
   <body>
@@ -95,6 +108,10 @@
         <span class="badge">{{ monitor_state.event_count|default:0 }} events</span>
       </div>
       <div class="right">
+        {% if can_control_monitor %}
+          <button type="button" data-action="start">Start</button>
+          <button type="button" data-action="stop">Stop</button>
+        {% endif %}
       </div>
     </header>
 
@@ -152,5 +169,17 @@
         {% endif %}
       </section>
     </main>
+    {% if can_control_monitor %}
+      <script>
+        async function callMonitorAction(action) {
+          await fetch(`/monitor/${action}/`);
+          window.location.reload();
+        }
+
+        document.querySelectorAll('[data-action]').forEach((button) => {
+          button.addEventListener('click', () => callMonitorAction(button.dataset.action));
+        });
+      </script>
+    {% endif %}
   </body>
 </html>

@@ -1,17 +1,18 @@
 # Render Deployment
 
-This guide deploys the Django backend to Render with:
+This guide deploys the Django backend to Render with the no-cost setup:
 
-- One web service for the API
-- One worker service for the monitor
-- One PostgreSQL database shared by both services
+- One free web service for the API
+- The monitor running inside that web service
+- One PostgreSQL database
 
-Important: Render does not offer the `free` plan for background workers. The
-web API can use `free`, but the monitor worker uses `starter`.
+Important: Render does not offer the `free` plan for background workers. To
+avoid the paid worker, set `AVIATOR_RUN_MONITOR_IN_WEB=True` and run only one
+Gunicorn worker process.
 
-In production the monitor page is read-only. The worker starts automatically
-after the service deploys, and the browser only polls status instead of
-starting/stopping the process itself.
+In this no-cost mode the monitor starts from the web service when the monitor
+page or status endpoint is opened. If the free web service sleeps or restarts,
+the monitor will stop until the service wakes up again.
 
 The monitor dashboard now renders recent logs and recent odds server-side, so
 it still shows useful data even when the live stream endpoint is disabled.
@@ -54,11 +55,9 @@ In Render:
 3. Select the correct `render.yaml`.
 4. Let Render create:
    - `aviator-backend-web`
-   - `aviator-backend-monitor`
    - `aviator-backend-db`
 
-The web service uses the `free` plan. The worker service uses the `starter`
-plan because Render workers cannot use `free`.
+The web service uses the `free` plan.
 
 The YAML already sets:
 
@@ -67,19 +66,13 @@ buildCommand: pip install -r requirements.txt && python manage.py collectstatic 
 startCommand: bash start.sh
 ```
 
-The worker starts with:
-
-```bash
-python manage.py run_monitor_worker
-```
-
 ## Option 2: Manual Render Setup
 
 Create a PostgreSQL database first.
 
 If you are using Neon instead of a Render database, skip the Render database
-step and copy the Neon direct connection string into `DATABASE_URL` for both
-services.
+step and copy the Neon direct connection string into `DATABASE_URL` for the web
+service.
 
 Then create a Python web service:
 
@@ -91,25 +84,18 @@ Start Command:
 bash start.sh
 ```
 
-Create a Python worker service:
-
-```bash
-Build Command:
-pip install -r requirements.txt
-
-Start Command:
-python manage.py run_monitor_worker
-```
-
 ## Required Environment Variables
 
-Set these on both the web service and the worker:
+Set these on the web service:
 
 ```bash
 DJANGO_DEBUG=False
 DJANGO_ALLOWED_HOSTS=.onrender.com
 DATABASE_URL=<your Render PostgreSQL connection string>
-DJANGO_SECRET_KEY=<one strong secret shared by web and worker>
+DJANGO_SECRET_KEY=<one strong secret>
+AVIATOR_RUN_MONITOR_IN_WEB=True
+AVIATOR_AUTO_START_MONITOR=True
+GUNICORN_WORKERS=1
 ```
 
 For Neon, use:
@@ -186,6 +172,9 @@ Expected result:
 ```json
 {"success": true}
 ```
+
+For the monitor status endpoint, `running` should become `true` after the web
+service starts the in-process monitor.
 
 The prediction endpoint may return `409` until the monitor reports that a round
 has ended. That is expected and is not a server crash.

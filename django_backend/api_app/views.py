@@ -26,6 +26,7 @@ except Exception:
 MONITOR_QUEUE = None
 MONITOR_THREAD = None
 MONITOR_STOP = None
+MONITOR_LOCK = threading.Lock()
 ROUND_OVER_MESSAGE = '[OK] ROUND IS OVER - cashout dropped to 0'
 ROUND_OVER_CORE_MESSAGE = 'ROUND IS OVER - cashout dropped to 0'
 MONITOR_STATE = {
@@ -39,6 +40,26 @@ MONITOR_STATE = {
     'last_prediction_phase': None,
     'last_prediction_at': None,
 }
+
+
+def _env_flag(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _web_monitor_enabled():
+    return django_settings.DEBUG or _env_flag('AVIATOR_RUN_MONITOR_IN_WEB')
+
+
+def _web_monitor_auto_start_enabled():
+    auto_start_default = _env_flag('AVIATOR_RUN_MONITOR_IN_WEB') and not django_settings.DEBUG
+    return _web_monitor_enabled() and _env_flag('AVIATOR_AUTO_START_MONITOR', default=auto_start_default)
+
+
+def _web_monitor_thread_alive():
+    return MONITOR_THREAD is not None and MONITOR_THREAD.is_alive()
 
 
 def _local_now():
@@ -119,6 +140,17 @@ def _load_monitor_state_from_db():
         return {**_default_monitor_state(), **MONITOR_STATE}
 
 
+def _current_monitor_state():
+    state = _load_monitor_state_from_db()
+    if _web_monitor_thread_alive():
+        state['running'] = True
+        if not state.get('last_event'):
+            state['last_event'] = MONITOR_STATE.get('last_event')
+        if not state.get('started_at'):
+            state['started_at'] = MONITOR_STATE.get('started_at')
+    return state
+
+
 def _persist_monitor_state():
     try:
         MonitorState.save_current(MONITOR_STATE)
@@ -139,7 +171,7 @@ def access_keys_page(request):
 def prediction_page(request):
     """Render a simple UI for generating a prediction."""
     return render(request, 'prediction.html', {
-        'monitor_state': _load_monitor_state_from_db(),
+        'monitor_state': _current_monitor_state(),
         'round_over_message': ROUND_OVER_MESSAGE,
     })
 
@@ -361,7 +393,9 @@ def prediction_proxy(request):
 
 
 def monitor_page(request):
-    shared_state = _load_monitor_state_from_db()
+    if _web_monitor_auto_start_enabled():
+        _start_web_monitor(clear_logs=False, requested_event='Monitor auto-start requested')
+    shared_state = _current_monitor_state()
     recent_logs = []
     recent_odds = []
     try:
@@ -381,6 +415,7 @@ def monitor_page(request):
         'monitor_state': shared_state,
         'recent_logs': recent_logs,
         'recent_odds': recent_odds,
+        'can_control_monitor': _web_monitor_enabled(),
     })
 
 
@@ -614,43 +649,52 @@ def _monitor_runner(q: queue.Queue, stop_event: threading.Event):
         _set_monitor_state(running=False)
 
 
-def monitor_start(request):
+def _start_web_monitor(*, clear_logs=True, requested_event='Monitor start requested'):
     global MONITOR_QUEUE, MONITOR_THREAD, MONITOR_STOP
-    if not django_settings.DEBUG:
+
+    with MONITOR_LOCK:
+        if _web_monitor_thread_alive():
+            return False
+
+        if clear_logs:
+            try:
+                MonitorLog.objects.all().delete()
+            except Exception:
+                pass
+
+        MONITOR_QUEUE = queue.Queue(maxsize=1000)
+        MONITOR_STOP = threading.Event()
+        MONITOR_THREAD = threading.Thread(target=_monitor_runner, args=(MONITOR_QUEUE, MONITOR_STOP), daemon=True)
+        MONITOR_THREAD.start()
+        MONITOR_STATE['awaiting_second_round_prediction'] = False
+        MONITOR_STATE['last_round_over_at'] = None
+        MONITOR_STATE['last_round_over_event'] = None
+        MONITOR_STATE['last_prediction_phase'] = None
+        MONITOR_STATE['last_prediction_at'] = None
+        _set_monitor_state(running=True, started_at=_local_iso(), last_event=requested_event, event_count=0)
+        return True
+
+
+def monitor_start(request):
+    if not _web_monitor_enabled():
         return JsonResponse({
             'success': True,
-            'message': 'Monitor is managed by the Render worker service.',
-            'state': _load_monitor_state_from_db(),
+            'message': 'Monitor is managed by the separate worker service. Set AVIATOR_RUN_MONITOR_IN_WEB=True to run it inside the web service.',
+            'state': _current_monitor_state(),
         })
 
-    if MONITOR_THREAD and MONITOR_THREAD.is_alive():
-        return JsonResponse({'success': True, 'message': 'Monitor already running', 'state': MONITOR_STATE})
-
-    try:
-        MonitorLog.objects.all().delete()
-    except Exception:
-        pass
-
-    MONITOR_QUEUE = queue.Queue(maxsize=1000)
-    MONITOR_STOP = threading.Event()
-    MONITOR_THREAD = threading.Thread(target=_monitor_runner, args=(MONITOR_QUEUE, MONITOR_STOP), daemon=True)
-    MONITOR_THREAD.start()
-    MONITOR_STATE['awaiting_second_round_prediction'] = False
-    MONITOR_STATE['last_round_over_at'] = None
-    MONITOR_STATE['last_round_over_event'] = None
-    MONITOR_STATE['last_prediction_phase'] = None
-    MONITOR_STATE['last_prediction_at'] = None
-    _set_monitor_state(running=True, started_at=_local_iso(), last_event='Monitor start requested', event_count=0)
-    return JsonResponse({'success': True, 'message': 'Monitor started', 'state': MONITOR_STATE})
+    started = _start_web_monitor()
+    message = 'Monitor started in web service' if started else 'Monitor already running in web service'
+    return JsonResponse({'success': True, 'message': message, 'state': _current_monitor_state()})
 
 
 def monitor_stop(request):
-    global MONITOR_QUEUE, MONITOR_THREAD, MONITOR_STOP
-    if not django_settings.DEBUG:
+    global MONITOR_STOP
+    if not _web_monitor_enabled():
         return JsonResponse({
             'success': True,
-            'message': 'Monitor stop is managed by the Render worker service.',
-            'state': _load_monitor_state_from_db(),
+            'message': 'Monitor stop is managed by the separate worker service. Set AVIATOR_RUN_MONITOR_IN_WEB=True to control it from the web service.',
+            'state': _current_monitor_state(),
         })
 
     if MONITOR_STOP:
@@ -658,12 +702,13 @@ def monitor_stop(request):
     _set_monitor_state(running=False, last_event='Stop requested')
     MONITOR_STATE['awaiting_second_round_prediction'] = False
     _persist_monitor_state()
-    return JsonResponse({'success': True, 'message': 'Stop requested', 'state': MONITOR_STATE})
+    return JsonResponse({'success': True, 'message': 'Stop requested', 'state': _current_monitor_state()})
 
 
 def monitor_status(request):
-    global MONITOR_THREAD, MONITOR_STOP
-    shared_state = _load_monitor_state_from_db()
+    if _web_monitor_auto_start_enabled():
+        _start_web_monitor(clear_logs=False, requested_event='Monitor auto-start requested')
+    shared_state = _current_monitor_state()
     return JsonResponse({
         'success': True,
         'running': bool(shared_state.get('running')),

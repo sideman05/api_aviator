@@ -39,7 +39,7 @@ On Render, use the database `Internal Database URL` or the value provided throug
 `fromDatabase.property: connectionString` in `render.yaml`.
 
 On Render with Neon, set `DATABASE_URL` manually from the Neon database settings
-in both the web service and the worker service.
+on the web service.
 
 ## Local PostgreSQL Setup
 
@@ -115,4 +115,3 @@ Gunicorn:
 ```bash
 ./start.sh
 ```
-
