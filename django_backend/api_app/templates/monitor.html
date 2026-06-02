@@ -49,8 +49,11 @@
         background: #b91c1c;
       }
       button:disabled {
-        opacity: 0.55;http://labs.ctfzone.com:8545
+        opacity: 0.55;
         cursor: not-allowed;
+      }
+      .hidden {
+        display: none;
       }
       .badge {
         padding: 6px 10px;
@@ -95,8 +98,8 @@
         <span id="count" class="badge">0 events</span>
       </div>
       <div class="right">
-        <button id="start" class="primary">Start</button>
-        <button id="stop" class="danger">Stop</button>
+        <button id="start" class="primary hidden">Start</button>
+        <button id="stop" class="danger hidden">Stop</button>
         <button id="clear">Clear</button>
       </div>
     </header>
@@ -120,6 +123,7 @@
       let reconnectDelay = 1000;
       let eventCount = 0;
       const MAX_LINES = 250;
+      const READ_ONLY_MODE = true;
 
       function setState(running) {
         stateBadge.textContent = running ? "running" : "stopped";
@@ -167,6 +171,7 @@
       }
 
       function connectStream() {
+        if (READ_ONLY_MODE) return;
         cleanupStream();
         es = new EventSource("stream/");
 
@@ -196,6 +201,7 @@
       }
 
       function scheduleReconnect() {
+        if (READ_ONLY_MODE) return;
         if (reconnectTimer) return;
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
@@ -205,12 +211,14 @@
       }
 
       startBtn.addEventListener("click", async () => {
+        if (READ_ONLY_MODE) return;
         await fetch("start/");
         await refreshStatus();
         connectStream();
       });
 
       stopBtn.addEventListener("click", async () => {
+        if (READ_ONLY_MODE) return;
         await fetch("stop/");
         await refreshStatus();
         cleanupStream();
@@ -222,7 +230,7 @@
       });
 
       refreshStatus().then(() => {
-        if (stateBadge.textContent === "running") {
+        if (!READ_ONLY_MODE && stateBadge.textContent === "running") {
           connectStream();
         }
       });

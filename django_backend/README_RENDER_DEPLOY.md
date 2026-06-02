@@ -9,6 +9,10 @@ This guide deploys the Django backend to Render with:
 Important: Render does not offer the `free` plan for background workers. The
 web API can use `free`, but the monitor worker uses `starter`.
 
+In production the monitor page is read-only. The worker starts automatically
+after the service deploys, and the browser only polls status instead of
+starting/stopping the process itself.
+
 ## Files Used
 
 Important backend files:
