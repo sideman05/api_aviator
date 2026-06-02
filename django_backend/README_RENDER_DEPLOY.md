@@ -13,6 +13,9 @@ In production the monitor page is read-only. The worker starts automatically
 after the service deploys, and the browser only polls status instead of
 starting/stopping the process itself.
 
+The monitor dashboard now renders recent logs and recent odds server-side, so
+it still shows useful data even when the live stream endpoint is disabled.
+
 ## Files Used
 
 Important backend files:

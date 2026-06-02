@@ -362,9 +362,25 @@ def prediction_proxy(request):
 
 def monitor_page(request):
     shared_state = _load_monitor_state_from_db()
+    recent_logs = []
+    recent_odds = []
+    try:
+        recent_logs = list(
+            MonitorLog.objects.order_by('-created_at').values('created_at', 'message')[:50]
+        )
+    except Exception:
+        recent_logs = []
+    try:
+        recent_odds = list(
+            MonitorRoundOdds.objects.order_by('-created_at').values('created_at', 'round_number', 'payout', 'raw_message')[:50]
+        )
+    except Exception:
+        recent_odds = []
     return render(request, 'monitor.html', {
         'is_running': bool(shared_state.get('running')),
         'monitor_state': shared_state,
+        'recent_logs': recent_logs,
+        'recent_odds': recent_odds,
     })
 
 
@@ -675,43 +691,7 @@ def monitor_odds(request):
 
 
 def monitor_stream(request):
-    global MONITOR_STOP
-    def event_stream():
-        heartbeat_at = time.monotonic()
-        last_log_id = 0
-        if not django_settings.DEBUG:
-            try:
-                last_log_id = MonitorLog.objects.order_by('-id').values_list('id', flat=True).first() or 0
-            except Exception:
-                last_log_id = 0
-
-        while True:
-            if MONITOR_STOP and MONITOR_STOP.is_set():
-                yield 'event: status\ndata: stopped\n\n'
-                break
-
-            try:
-                rows = MonitorLog.objects.filter(id__gt=last_log_id).order_by('id')[:100]
-                emitted = False
-                for row in rows:
-                    last_log_id = row.id
-                    emitted = True
-                    yield f'event: log\ndata: {row.message}\n\n'
-                if emitted:
-                    heartbeat_at = time.monotonic()
-                    continue
-            except Exception:
-                pass
-
-            now = time.monotonic()
-            if now - heartbeat_at >= 15:
-                heartbeat_at = now
-                yield f'event: heartbeat\ndata: {_local_iso()}\n\n'
-                continue
-
-            time.sleep(1)
-
-    response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
-    response['Cache-Control'] = 'no-cache'
-    response['X-Accel-Buffering'] = 'no'
-    return response
+    return JsonResponse({
+        'success': True,
+        'message': 'Streaming is disabled in production. Use /monitor/status/ and the server-rendered monitor page.',
+    })
