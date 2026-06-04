@@ -50,11 +50,11 @@ def _env_flag(name, default=False):
 
 
 def _web_monitor_enabled():
-    return django_settings.DEBUG or _env_flag('AVIATOR_RUN_MONITOR_IN_WEB')
+    return _env_flag('AVIATOR_RUN_MONITOR_IN_WEB', default=True)
 
 
 def _web_monitor_auto_start_enabled():
-    auto_start_default = _env_flag('AVIATOR_RUN_MONITOR_IN_WEB') and not django_settings.DEBUG
+    auto_start_default = _web_monitor_enabled() and not django_settings.DEBUG
     return _web_monitor_enabled() and _env_flag('AVIATOR_AUTO_START_MONITOR', default=auto_start_default)
 
 
@@ -714,6 +714,30 @@ def monitor_status(request):
         'running': bool(shared_state.get('running')),
         'state': shared_state,
     })
+
+
+def monitor_logs(request):
+    if request.method == 'OPTIONS':
+        return HttpResponse(status=204)
+    if request.method != 'GET':
+        return JsonResponse({'success': False, 'message': 'Only GET supported'}, status=405)
+
+    qs = MonitorLog.objects.order_by('-created_at')[:200]
+    out = []
+    for row in qs:
+        try:
+            ts = _format_local_datetime(row.created_at, include_millis=True)
+        except Exception:
+            ts = row.created_at.isoformat()
+        out.append({
+            'id': row.id,
+            'created_at': row.created_at.isoformat(),
+            'display_time': ts,
+            'message': row.message,
+            'line': row.message if row.message.startswith('[') else f'[{ts}] {row.message}',
+        })
+
+    return JsonResponse({'success': True, 'data': out})
 
 
 def monitor_odds(request):

@@ -11,6 +11,7 @@ urlpatterns = [
     path('monitor/', views.monitor_page, name='monitor_page'),
     path('monitor/stream/', views.monitor_stream, name='monitor_stream'),
     path('monitor/status/', views.monitor_status, name='monitor_status'),
+    path('monitor/logs/', views.monitor_logs, name='monitor_logs'),
     path('monitor/odds/', views.monitor_odds, name='monitor_odds'),
     path('monitor/start/', views.monitor_start, name='monitor_start'),
     path('monitor/stop/', views.monitor_stop, name='monitor_stop'),

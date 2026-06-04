@@ -82,6 +82,7 @@
         border: 1px solid #1f2a44;
         border-radius: 10px;
         background: #0a1322;
+        word-break: break-word;
       }
       button {
         border: 1px solid #334155;
@@ -102,60 +103,62 @@
     <header>
       <div class="left">
         <strong>Monitor Output</strong>
-        <span class="badge {% if monitor_state.running %}on{% else %}off{% endif %}">
+        <span id="statusBadge" class="badge {% if monitor_state.running %}on{% else %}off{% endif %}">
           {% if monitor_state.running %}running{% else %}stopped{% endif %}
         </span>
-        <span class="badge">{{ monitor_state.event_count|default:0 }} events</span>
+        <span id="eventBadge" class="badge">{{ monitor_state.event_count|default:0 }} events</span>
       </div>
       <div class="right">
         {% if can_control_monitor %}
           <button type="button" data-action="start">Start</button>
           <button type="button" data-action="stop">Stop</button>
         {% endif %}
+        <button type="button" id="refreshButton">Refresh</button>
       </div>
     </header>
 
     <main>
-      <div class="muted">
+      <div class="muted" id="lastEventSummary">
         {% if monitor_state.last_event %}
           Last event: {{ monitor_state.last_event }}
         {% else %}
           Waiting for events…
         {% endif %}
       </div>
+      <div class="muted" id="actionMessage" style="margin-top: 8px;"></div>
 
       <section class="panel">
         <div class="muted" style="margin-bottom: 8px;">Monitor state</div>
         <div class="grid">
-          <div class="entry">Running: {{ monitor_state.running|yesno:"Yes,No" }}</div>
-          <div class="entry">Started at: {{ monitor_state.started_at|default:"-" }}</div>
-          <div class="entry">Last event: {{ monitor_state.last_event|default:"-" }}</div>
-          <div class="entry">Awaiting second-round prediction: {{ monitor_state.awaiting_second_round_prediction|yesno:"Yes,No" }}</div>
-          <div class="entry">Last round-over at: {{ monitor_state.last_round_over_at|default:"-" }}</div>
-          <div class="entry">Last prediction at: {{ monitor_state.last_prediction_at|default:"-" }}</div>
+          <div class="entry">Running: <span id="runningValue">{{ monitor_state.running|yesno:"Yes,No" }}</span></div>
+          <div class="entry">Started at: <span id="startedAtValue">{{ monitor_state.started_at|default:"-" }}</span></div>
+          <div class="entry">Last event: <span id="lastEventValue">{{ monitor_state.last_event|default:"-" }}</span></div>
+          <div class="entry">Awaiting second-round prediction: <span id="awaitingValue">{{ monitor_state.awaiting_second_round_prediction|yesno:"Yes,No" }}</span></div>
+          <div class="entry">Last round-over at: <span id="lastRoundOverValue">{{ monitor_state.last_round_over_at|default:"-" }}</span></div>
+          <div class="entry">Last prediction at: <span id="lastPredictionValue">{{ monitor_state.last_prediction_at|default:"-" }}</span></div>
         </div>
       </section>
 
       <section class="panel">
         <div class="muted" style="margin-bottom: 8px;">Recent log entries</div>
-        {% if recent_logs %}
-          <div class="grid">
+        <div class="grid" id="logList">
+          {% if recent_logs %}
             {% for row in recent_logs %}
               <div class="entry">
                 <div>{{ row.message }}</div>
                 <div class="muted">{{ row.created_at }}</div>
               </div>
             {% endfor %}
-          </div>
-        {% else %}
-          <div class="muted">No log entries yet.</div>
-        {% endif %}
+          {% else %}
+            <div class="muted">No log entries yet.</div>
+          {% endif %}
+        </div>
       </section>
 
       <section class="panel">
         <div class="muted" style="margin-bottom: 8px;">Recent odds</div>
-        {% if recent_odds %}
-          <div class="grid">
+        <div class="grid" id="oddsList">
+          {% if recent_odds %}
             {% for row in recent_odds %}
               <div class="entry">
                 <div>Round #{{ row.round_number|default:"-" }} — {{ row.payout }}x</div>
@@ -163,23 +166,117 @@
                 <div class="muted">{{ row.raw_message|default:"" }}</div>
               </div>
             {% endfor %}
-          </div>
-        {% else %}
-          <div class="muted">No odds stored yet.</div>
-        {% endif %}
+          {% else %}
+            <div class="muted">No odds stored yet.</div>
+          {% endif %}
+        </div>
       </section>
     </main>
-    {% if can_control_monitor %}
-      <script>
-        async function callMonitorAction(action) {
-          await fetch(`/monitor/${action}/`);
-          window.location.reload();
-        }
+    <script>
+      const statusBadge = document.getElementById('statusBadge');
+      const eventBadge = document.getElementById('eventBadge');
+      const lastEventSummary = document.getElementById('lastEventSummary');
+      const actionMessage = document.getElementById('actionMessage');
+      const runningValue = document.getElementById('runningValue');
+      const startedAtValue = document.getElementById('startedAtValue');
+      const lastEventValue = document.getElementById('lastEventValue');
+      const awaitingValue = document.getElementById('awaitingValue');
+      const lastRoundOverValue = document.getElementById('lastRoundOverValue');
+      const lastPredictionValue = document.getElementById('lastPredictionValue');
+      const logList = document.getElementById('logList');
+      const oddsList = document.getElementById('oddsList');
+      const refreshButton = document.getElementById('refreshButton');
 
-        document.querySelectorAll('[data-action]').forEach((button) => {
-          button.addEventListener('click', () => callMonitorAction(button.dataset.action));
-        });
-      </script>
-    {% endif %}
+      function html(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        }[char]));
+      }
+
+      function pretty(value) {
+        return value === null || value === undefined || value === '' ? '-' : String(value);
+      }
+
+      function updateState(state) {
+        const running = Boolean(state && state.running);
+        const lastEvent = state && state.last_event;
+        statusBadge.className = `badge ${running ? 'on' : 'off'}`;
+        statusBadge.textContent = running ? 'running' : 'stopped';
+        eventBadge.textContent = `${Number(state && state.event_count || 0)} events`;
+        lastEventSummary.textContent = lastEvent ? `Last event: ${lastEvent}` : 'Waiting for events...';
+        runningValue.textContent = running ? 'Yes' : 'No';
+        startedAtValue.textContent = pretty(state && state.started_at);
+        lastEventValue.textContent = pretty(lastEvent);
+        awaitingValue.textContent = state && state.awaiting_second_round_prediction ? 'Yes' : 'No';
+        lastRoundOverValue.textContent = pretty(state && state.last_round_over_at);
+        lastPredictionValue.textContent = pretty(state && state.last_prediction_at);
+      }
+
+      async function refreshStatus() {
+        const response = await fetch('/monitor/status/', { cache: 'no-store' });
+        const data = await response.json();
+        updateState(data.state || {});
+      }
+
+      async function refreshLogs() {
+        const response = await fetch('/monitor/logs/', { cache: 'no-store' });
+        const data = await response.json();
+        const rows = data.data || [];
+        logList.innerHTML = rows.length
+          ? rows.map((row) => `
+              <div class="entry">
+                <div>${html(row.line || row.message || '')}</div>
+                <div class="muted">${html(row.display_time || row.created_at || '')}</div>
+              </div>
+            `).join('')
+          : '<div class="muted">No log entries yet.</div>';
+      }
+
+      async function refreshOdds() {
+        const response = await fetch('/monitor/odds/', { cache: 'no-store' });
+        const data = await response.json();
+        const rows = data.data || [];
+        oddsList.innerHTML = rows.length
+          ? rows.map((row) => `
+              <div class="entry">
+                <div>Round #${html(row.round ?? '-')} - ${html(row.payout ?? '-')}x</div>
+                <div class="muted">${html(row.created_at || '')}</div>
+                <div class="muted">${html(row.raw_message || '')}</div>
+              </div>
+            `).join('')
+          : '<div class="muted">No odds stored yet.</div>';
+      }
+
+      async function refreshAll() {
+        try {
+          await Promise.all([refreshStatus(), refreshLogs(), refreshOdds()]);
+        } catch (error) {
+          actionMessage.textContent = `Refresh failed: ${error}`;
+        }
+      }
+
+      async function callMonitorAction(action) {
+        try {
+          const response = await fetch(`/monitor/${action}/`, { cache: 'no-store' });
+          const data = await response.json();
+          actionMessage.textContent = data.message || `${action} requested`;
+          await refreshAll();
+        } catch (error) {
+          actionMessage.textContent = `${action} failed: ${error}`;
+        }
+      }
+
+      document.querySelectorAll('[data-action]').forEach((button) => {
+        button.addEventListener('click', () => callMonitorAction(button.dataset.action));
+      });
+      refreshButton.addEventListener('click', refreshAll);
+
+      refreshAll();
+      setInterval(refreshAll, 3000);
+    </script>
   </body>
 </html>
